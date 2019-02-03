@@ -43,6 +43,7 @@ namespace BuscaPreciosV2
 
             app.UseHttpsRedirection();
             app.UseMvc();
+            //
         }
     }
 }
