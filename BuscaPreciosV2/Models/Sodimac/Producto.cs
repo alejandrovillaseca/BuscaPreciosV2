@@ -1,8 +1,9 @@
-﻿namespace BuscaPreciosV2.Models
-{
-    using System;
+﻿using System;
 
-    public partial class SodimacCLProducto
+namespace BuscaPreciosV2.Models.Sodimac
+{
+
+    public partial class Producto
     {
         public int id { get; set; }
         public string NombreProducto { get; set; }

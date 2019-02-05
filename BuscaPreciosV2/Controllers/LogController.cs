@@ -79,7 +79,6 @@ namespace BuscaPreciosV2.Controllers
         {
             try
             {
-                log.id = Guid.NewGuid().ToString();
                 PushResponse response = await client.PushAsync("log", log);
                 var name = response.Result.name; //The result will contain the child name of the new data that was added
                 return new Header()
@@ -129,9 +128,8 @@ namespace BuscaPreciosV2.Controllers
         public IConfiguration Configuration { get; }
         private IFirebaseClient client;
 
-        public LogController()
+        public LogController(IConfiguration configuration)
         {
-            IConfiguration configuration = Configuration;
             string connString = configuration.GetSection("ConnectionApp").GetSection("FirebaseSecretCode").Value;
             string basePath = configuration.GetSection("ConnectionApp").GetSection("BasePath").Value;
 
