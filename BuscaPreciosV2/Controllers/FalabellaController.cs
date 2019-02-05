@@ -13,7 +13,6 @@ using FireSharp.Response;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
 
 // For more information on enabling Web API for empty projects, visit https://go.microsoft.com/fwlink/?LinkID=397860
 
@@ -87,6 +86,62 @@ namespace BuscaPreciosV2.Controllers
         /// <returns></returns>
         private async Task<ResponsePorPagina> ProcesaProductoPorURLAsync(string url)
         {
+            try
+            {
+                var _htmlDocument = await ObtenerHtmlDocumentAsync(url);
+                var ini = "fbra_browseProductListConfig";
+                var fin = "var fbra_browseProductList =";
+                var json = _htmlDocument.Text.Substring(_htmlDocument.Text.IndexOf(ini) + ini.Length + 3, _htmlDocument.Text.IndexOf(fin) - _htmlDocument.Text.IndexOf(ini) - ini.Length - 3);
+                json = json.Replace(";", "");
+
+                ProductoResponse _responseData;
+                try
+                {
+                    _responseData = JsonConvert.DeserializeObject<ProductoResponse>(json);
+                }
+                catch (Exception ex)
+                {
+                    return new ResponsePorPagina()
+                    {
+                        Header = new Header()
+                        {
+                            Correcto = false,
+                            FechaProceso = DateTime.Now,
+                            Observación = $"Lo más probable es que cambió el contrato. {ex.Message}"
+                        }
+                    };
+                }
+                return new ResponsePorPagina()
+                {
+                    Header = new Header()
+                    {
+                        Correcto = true,
+                        FechaProceso = DateTime.Now,
+                        Observación = "Procesado correctamente",
+                    },
+                    ProductosPorPágina = _responseData
+                };
+            }
+            catch (Exception ex)
+            {
+                return new ResponsePorPagina()
+                {
+                    Header = new Header()
+                    {
+                        Correcto = false,
+                        FechaProceso = DateTime.Now,
+                        Observación = ex.Message
+                    }
+                };
+            }
+        }
+        /// <summary>
+        /// Obtiene objeto HtmlDocument de la url pasada, quizás deba ser parte de un handler global....
+        /// </summary>
+        /// <param name="url"></param>
+        /// <returns></returns>
+        private async Task<HtmlAgilityPack.HtmlDocument> ObtenerHtmlDocumentAsync(string url)
+        {
             var htmlDocument = new HtmlAgilityPack.HtmlDocument();
             string source = string.Empty;
             try
@@ -94,13 +149,13 @@ namespace BuscaPreciosV2.Controllers
                 WebRequest req = HttpWebRequest.Create(url);
                 req.Method = "GET";
 
-
                 using (var reader = new StreamReader(req.GetResponse().GetResponseStream()))
                 {
                     source = reader.ReadToEnd();
                 }
 
                 htmlDocument.LoadHtml(source);
+                return htmlDocument;
             }
             catch (Exception ex)
             {
@@ -114,48 +169,8 @@ namespace BuscaPreciosV2.Controllers
 
                 //CantidadProductos = 0;
                 //_htmlDocument = htmlDocument; //devuelve la variable hacia afuera del método.
-                return new ResponsePorPagina()
-                {
-                    Header = new Header()
-                    {
-                        Correcto = false,
-                        FechaProceso = DateTime.Now,
-                        Observación = _log.Observaciones
-                    }
-                };
+                throw new Exception(_log.Observaciones);
             }
-            var ini = "fbra_browseProductListConfig";
-            var fin = "var fbra_browseProductList =";
-            var json = htmlDocument.Text.Substring(htmlDocument.Text.IndexOf(ini) + ini.Length + 3, htmlDocument.Text.IndexOf(fin) - htmlDocument.Text.IndexOf(ini) - ini.Length - 3);
-            json = json.Replace(";", "");
-
-            ProductoResponse _responseData;
-            try
-            {
-                _responseData = JsonConvert.DeserializeObject<ProductoResponse>(json);
-            }
-            catch (Exception ex)
-            {
-                return new ResponsePorPagina()
-                {
-                    Header = new Header()
-                    {
-                        Correcto = false,
-                        FechaProceso = DateTime.Now,
-                        Observación = $"Lo más probable es que cambió el contrato. {ex.Message}"
-                    }
-                };
-            }
-            return new ResponsePorPagina()
-            {
-                Header = new Header()
-                {
-                    Correcto = true,
-                    FechaProceso = DateTime.Now,
-                    Observación = "Procesado correctamente",
-                },               
-                ProductosPorPágina = _responseData
-            };
         }
 
         [HttpPost("falabella/product/insert")]
@@ -233,6 +248,29 @@ namespace BuscaPreciosV2.Controllers
             }
         }
 
+        public async Task<Header> InsertUrl(Url url)
+        {
+            try
+            {
+                PushResponse response = await client.PushAsync("falabella/urls", url);
+                var name = response.Result.name; //The result will contain the child name of the new data that was added
+                return new Header()
+                {
+                    Correcto = true,
+                    FechaProceso = DateTime.Now,
+                    Observación = $"URL insertada correctamente: {name}"
+                };
+            }
+            catch (Exception ex)
+            {
+                return new Header()
+                {
+                    FechaProceso = DateTime.Now,
+                    Observación = ex.Message,
+                    Correcto = false
+                };
+            }
+        }
 
         [HttpGet("falabella/product/list")]
         public async Task<Response> ListProducts(string CodigoProducto = null, int? idProceso = null)
@@ -271,11 +309,40 @@ namespace BuscaPreciosV2.Controllers
             }
         }
 
+        [HttpGet("geturls")]
+        public async Task GetUrlsAsync()
+        {
+            var _htmlDocument = await ObtenerHtmlDocumentAsync("https://www.falabella.com/falabella-cl");
+            var _menu = _htmlDocument.DocumentNode.SelectNodes(string.Format("//li[@class='fb-masthead__primary-links__item']"));
+            foreach (var item in _menu)
+            {
+                //Por cada menú, recorro las categorías
+                var cat = new HtmlAgilityPack.HtmlDocument();
+                cat.LoadHtml(item.InnerHtml);
+                var _cat = cat.DocumentNode.SelectNodes(string.Format("//li[@class='fb-masthead__child-links__item']"));
+                foreach (var item2 in _cat)
+                {
+                    //Ahora que estoy en la categoría, obtengo el link de "Todos"
+                    var _link = new HtmlAgilityPack.HtmlDocument();
+                    _link.LoadHtml(item2.InnerHtml);
+                    var link = _link.DocumentNode.SelectNodes(string.Format("//li[@class='fb-masthead__grandchild-links__item']"));
+                    var url = link.LastOrDefault().SelectNodes("a")[0].Attributes["href"].Value;
+                    url = BASE_URL + url;
+                    //La inserto en la BD
+                    //TODO --> Debo validar si la URL ya existe. En caso contrario la agrego:
+                    await InsertUrl(new Models.Url()
+                    {
+                        URL = url
+                    });
+                }
+            }
+        }
 
 
         public IConfiguration Configuration { get; }
         private IFirebaseClient client;
         public LogController _logController;
+        const string BASE_URL = "https://www.falabella.com";
         public FalabellaController(IConfiguration configuration)
         {
 
@@ -289,5 +356,6 @@ namespace BuscaPreciosV2.Controllers
             };
             client = new FirebaseClient(config);
         }
+
     }
 }
