@@ -9,9 +9,11 @@ namespace BuscaPreciosV2.Models
         public string Id { get; private set; }
         public string Observaciones { get; set; }
         public string URL { get; set; }
+        public DateTime FechaLog { get; private set; }
         public LogErrores()
         {
             this.Id = Guid.NewGuid().ToString();
+            this.FechaLog = DateTime.Now;
         }
     }
 }

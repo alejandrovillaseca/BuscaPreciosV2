@@ -9,9 +9,16 @@ namespace BuscaPreciosV2.Models
     {
         public string Id { get; private set; }
         public string URL { get; set; }
+        public long CantPaginas { get; set; }
         public Url()
         {
             this.Id = Guid.NewGuid().ToString();
         }
+    }
+
+    public class UrlResponse
+    {
+        public Header Header { get; set; }
+        public List<Url> Urls { get; set; }
     }
 }

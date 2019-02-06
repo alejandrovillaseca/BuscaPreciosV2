@@ -29,7 +29,7 @@ namespace BuscaPreciosV2.Controllers
             try
             {
                 stats.Id = Guid.NewGuid().ToString();
-                PushResponse response = await client.PushAsync("stats", stats);
+                PushResponse response = await client.PushAsync("stats/falabella", stats);
                 var name = response.Result.name; //The result will contain the child name of the new data that was added
                 return new Header()
                 {
@@ -54,7 +54,7 @@ namespace BuscaPreciosV2.Controllers
         {
             try
             {
-                var response = await client.UpdateAsync("stats", stats);
+                var response = await client.UpdateAsync("stats/falabella", stats);
                 stats = response.ResultAs<Stats>(); //The response will contain the data written
                 return new Header()
                 {
@@ -79,7 +79,7 @@ namespace BuscaPreciosV2.Controllers
         {
             try
             {
-                PushResponse response = await client.PushAsync("log", log);
+                PushResponse response = await client.PushAsync("log/falabella", log);
                 var name = response.Result.name; //The result will contain the child name of the new data that was added
                 return new Header()
                 {
@@ -104,7 +104,7 @@ namespace BuscaPreciosV2.Controllers
         {
             try
             {
-                var response = await client.UpdateAsync("log", log);
+                var response = await client.UpdateAsync("log/falabella", log);
                 log = response.ResultAs<LogErrores>(); //The response will contain the data written
                 return new Header()
                 {

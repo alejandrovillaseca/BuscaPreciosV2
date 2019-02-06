@@ -22,37 +22,38 @@ namespace BuscaPreciosV2.Controllers
     public class FalabellaController : Controller
     {
         [HttpPost("urlprocess")]
-        public async Task<Response> ProcesaURLAsync(string url)
+        public async Task<Response> ProcesaURLAsync(Url _objUrl)
         {
             try
             {
-                var _listProductos = new List<ProductoResponse>();
-                ResponsePorPagina _responseData = await ProcesaProductoPorURLAsync(url);
+                var _listProductos = new List<ResultList>();
+                Response _responseData = await ProcesaProductoPorURLAsync(_objUrl.URL);
                 if (!_responseData.Header.Correcto)
                     throw new Exception(_responseData.Header.Observación);
 
-                //Se inserta la primera lista de productos.
-                await InsertProduct(_responseData.ProductosPorPágina);
-                _listProductos.Add(_responseData.ProductosPorPágina);
+                //Se inserta la primera lista de productos en firebird
+                //TODO: Se inserta solo si existen
+                await InsertProduct(_responseData.Productos);
+                _listProductos = _listProductos.Union(_responseData.Productos).ToList();
                 //Ahora tengo que hacer lo mismo para la cantidad de páginas que existan
-                var cantPaginas = _responseData.ProductosPorPágina.State.SearchItemList.PagesTotal;
-                for (int i = 2; i <= cantPaginas; i++)
+                for (int i = 2; i <= _objUrl.CantPaginas; i++)
                 {
-                    var _url = url + $"?page={i}";
+                    var _url = _objUrl.URL + $"&page={i}";
                     _responseData = await ProcesaProductoPorURLAsync(_url);
                     if (!_responseData.Header.Correcto)
                     {
-                        var _log = new LogErrores()
+                        await new LogController(Configuration).InsertLog(new LogErrores()
                         {
                             URL = _url,
-                            Observaciones = "Error al obtener información de la URL. " + _responseData.Header.Observación
-                        };
-                        await _logController.InsertLog(_log);
+                            Observaciones = $"Error al obtener información de la URL en ProcesaProductoPorURLAsync. URL: {_url} Page: {i}" + _responseData.Header.Observación
+                        });
+                        continue;
                     }
 
                     //Se inserta la otra lista de productos.
-                    await InsertProduct(_responseData.ProductosPorPágina);
-                    _listProductos.Add(_responseData.ProductosPorPágina);
+                    //TODO insertar solo si no existe...
+                    await InsertProduct(_responseData.Productos);
+                    _listProductos = _listProductos.Union(_responseData.Productos).ToList();
                 }
 
                 return new Response()
@@ -80,11 +81,12 @@ namespace BuscaPreciosV2.Controllers
             }
         }
         /// <summary>
-        /// Método que devuelve los objetos deserializados de la consulta por HttpWebRequest
+        /// Método que devuelve los objetos deserializados de la página por HttpWebRequest
         /// </summary>
         /// <param name="url"></param>
         /// <returns></returns>
-        private async Task<ResponsePorPagina> ProcesaProductoPorURLAsync(string url)
+        [HttpGet("procesapagina")]
+        public async Task<Response> ProcesaProductoPorURLAsync(string url)
         {
             try
             {
@@ -101,7 +103,7 @@ namespace BuscaPreciosV2.Controllers
                 }
                 catch (Exception ex)
                 {
-                    return new ResponsePorPagina()
+                    return new Response()
                     {
                         Header = new Header()
                         {
@@ -111,7 +113,8 @@ namespace BuscaPreciosV2.Controllers
                         }
                     };
                 }
-                return new ResponsePorPagina()
+
+                return new Response()
                 {
                     Header = new Header()
                     {
@@ -119,12 +122,13 @@ namespace BuscaPreciosV2.Controllers
                         FechaProceso = DateTime.Now,
                         Observación = "Procesado correctamente",
                     },
-                    ProductosPorPágina = _responseData
+                    Productos = _responseData.State.SearchItemList.ResultList,
+                    FullObject = _responseData
                 };
             }
             catch (Exception ex)
             {
-                return new ResponsePorPagina()
+                return new Response()
                 {
                     Header = new Header()
                     {
@@ -135,6 +139,7 @@ namespace BuscaPreciosV2.Controllers
                 };
             }
         }
+
         /// <summary>
         /// Obtiene objeto HtmlDocument de la url pasada, quizás deba ser parte de un handler global....
         /// </summary>
@@ -159,22 +164,17 @@ namespace BuscaPreciosV2.Controllers
             }
             catch (Exception ex)
             {
-                //Marcamos el log como error:
-                Models.LogErrores _log = new Models.LogErrores()
+                await new LogController(Configuration).InsertLog(new LogErrores()
                 {
                     URL = url,
-                    Observaciones = "Error al obtener información de la URL. " + ex.Message
-                };
-                await _logController.InsertLog(_log);
-
-                //CantidadProductos = 0;
-                //_htmlDocument = htmlDocument; //devuelve la variable hacia afuera del método.
-                throw new Exception(_log.Observaciones);
+                    Observaciones = $"Error al obtener información de la URL. Método ObtenerHtmlDocumentAsync. URL: {url} " + ex.Message
+                });
+                throw new Exception(ex.Message);
             }
         }
 
         [HttpPost("falabella/product/insert")]
-        public async Task<Header> InsertProduct(ProductoResponse producto)
+        public async Task<Header> InsertProduct(List<ResultList> producto)
         {
             try
             {
@@ -198,12 +198,12 @@ namespace BuscaPreciosV2.Controllers
             }
         }
         [HttpPut("falabella/product/update")]
-        public async Task<Header> UpdateProduct(Producto producto)
+        public async Task<Header> UpdateProduct(ResultList producto)
         {
             try
             {
                 var response = await client.UpdateAsync("falabella/productos", producto);
-                producto = response.ResultAs<Producto>(); //The response will contain the data written
+                producto = response.ResultAs<ResultList>(); //The response will contain the data written
                 return new Header()
                 {
                     Correcto = true,
@@ -222,22 +222,22 @@ namespace BuscaPreciosV2.Controllers
             }
         }
 
-        public async Task<bool> DeleteRepeatProduct(int idProceso, string CodigoProducto)
+        public async Task<bool> DeleteRepeatProduct(string SKU)
         {
             try
             {
-                FirebaseResponse response;
-                var products = await ListProducts(CodigoProducto, idProceso);
-                foreach (var item in products.Productos)
-                {
-                    if (item.State.SearchItemList.ResultList.Count() < 2)
-                        return false;
+                //FirebaseResponse response;
+                var products = await GetProducts(SKU);
+                ////foreach (var item in products.Productos)
+                ////{
+                ////    if (item..Count() < 2)
+                ////        return false;
 
-                    //foreach (var _item in products.Productos.State.SearchItemList.ResultList)
-                    //{
-                    //    response = await client.DeleteAsync("falabella/productos" + item.SkuId);
-                    //}
-                }
+                ////    //foreach (var _item in products.Productos.State.SearchItemList.ResultList)
+                ////    //{
+                ////    //    response = await client.DeleteAsync("falabella/productos" + item.SkuId);
+                ////    //}
+                ////}
 
 
                 return true;
@@ -248,11 +248,11 @@ namespace BuscaPreciosV2.Controllers
             }
         }
 
-        public async Task<Header> InsertUrl(Url url)
+        public async Task<Header> InsertUrl(Url _url)
         {
             try
             {
-                PushResponse response = await client.PushAsync("falabella/urls", url);
+                PushResponse response = await client.PushAsync("falabella/urls", _url);
                 var name = response.Result.name; //The result will contain the child name of the new data that was added
                 return new Header()
                 {
@@ -272,18 +272,18 @@ namespace BuscaPreciosV2.Controllers
             }
         }
 
-        [HttpGet("falabella/product/list")]
-        public async Task<Response> ListProducts(string CodigoProducto = null, int? idProceso = null)
+        [HttpGet("products/get")]
+        public async Task<Response> GetProducts(string SKU)
         {
             try
             {
                 FirebaseResponse response;
-                if (idProceso == null && CodigoProducto == null)
+                if (SKU == null)
                     response = await client.GetAsync("falabella/productos");
                 else
-                    response = await client.GetAsync("falabella/productos/" + idProceso);
+                    response = await client.GetAsync("falabella/productos");
 
-                var products = response.ResultAs<List<ProductoResponse>>(); //The response will contain the data written
+                var products = response.ResultAs<List<ResultList>>(); //The response will contain the data written
                 return new Response()
                 {
                     Header = new Header()
@@ -309,35 +309,135 @@ namespace BuscaPreciosV2.Controllers
             }
         }
 
+        /// <summary>
+        /// Método que procesa todas las URL encontradas en la página de Falabella CL
+        /// </summary>
+        /// <returns></returns>
         [HttpGet("geturls")]
-        public async Task GetUrlsAsync()
+        public async Task<UrlResponse> GetUrlsAsync()
         {
-            var _htmlDocument = await ObtenerHtmlDocumentAsync("https://www.falabella.com/falabella-cl");
-            var _menu = _htmlDocument.DocumentNode.SelectNodes(string.Format("//li[@class='fb-masthead__primary-links__item']"));
-            foreach (var item in _menu)
+            var _lstUrl = new List<Url>();
+            try
             {
-                //Por cada menú, recorro las categorías
-                var cat = new HtmlAgilityPack.HtmlDocument();
-                cat.LoadHtml(item.InnerHtml);
-                var _cat = cat.DocumentNode.SelectNodes(string.Format("//li[@class='fb-masthead__child-links__item']"));
-                foreach (var item2 in _cat)
+                var _htmlDocument = await ObtenerHtmlDocumentAsync("https://www.falabella.com/falabella-cl");
+                var _menu = _htmlDocument.DocumentNode.SelectNodes(string.Format("//li[@class='fb-masthead__primary-links__item']"));
+                foreach (var item in _menu)
                 {
-                    //Ahora que estoy en la categoría, obtengo el link de "Todos"
-                    var _link = new HtmlAgilityPack.HtmlDocument();
-                    _link.LoadHtml(item2.InnerHtml);
-                    var link = _link.DocumentNode.SelectNodes(string.Format("//li[@class='fb-masthead__grandchild-links__item']"));
-                    var url = link.LastOrDefault().SelectNodes("a")[0].Attributes["href"].Value;
-                    url = BASE_URL + url;
-                    //La inserto en la BD
-                    //TODO --> Debo validar si la URL ya existe. En caso contrario la agrego:
-                    await InsertUrl(new Models.Url()
+                    //Por cada menú, recorro las categorías
+                    var cat = new HtmlAgilityPack.HtmlDocument();
+                    cat.LoadHtml(item.InnerHtml);
+                    var _cat = cat.DocumentNode.SelectNodes(string.Format("//li[@class='fb-masthead__child-links__item']"));
+                    foreach (var item2 in _cat)
                     {
-                        URL = url
-                    });
+                        //Ahora que estoy en la categoría, obtengo el link de "Todos"
+                        var _link = new HtmlAgilityPack.HtmlDocument();
+                        _link.LoadHtml(item2.InnerHtml);
+                        var link = _link.DocumentNode.SelectNodes(string.Format("//li[@class='fb-masthead__grandchild-links__item']"));
+                        var url = link.LastOrDefault().SelectNodes("a")[0].Attributes["href"].Value;
+                        url = BASE_URL + url + "?isPLP=1"; //No sé por que no viene en el htmlDocument...
+                                                           //La inserto en la BD
+                                                           //TODO --> Debo validar si la URL ya existe. En caso contrario la agrego:
+                                                           //Necesito saber la cantidad de páginas de la url...
+                        var _doc = await ProcesaProductoPorURLAsync(url);
+                        if (!_doc.Header.Correcto)
+                        {
+                            await new LogController(Configuration).InsertLog(new LogErrores()
+                            {
+                                URL = url,
+                                Observaciones = "Error al ProcesaProductoPorURLAsync: " + _doc.Header.Observación
+                            });
+                            continue;
+                        }
+
+                        var _url = new Models.Url()
+                        {
+                            URL = url,
+                            CantPaginas = _doc.FullObject.State.SearchItemList.PagesTotal
+                        };
+                        //TODO insertar solo si existe
+                        await InsertUrl(_url);
+                        _lstUrl.Add(_url);
+                    }
                 }
+                return new UrlResponse()
+                {
+                    Header = new Header()
+                    {
+                        Correcto = true,
+                        FechaProceso = DateTime.Now,
+                        Observación = "URL's procesadas correctamente",
+                    },
+                    Urls = _lstUrl
+                };
+            }
+            catch (Exception ex)
+            {
+                return new UrlResponse()
+                {
+                    Header = new Header()
+                    {
+                        Correcto = false,
+                        FechaProceso = DateTime.Now,
+                        Observación = ex.Message
+                    }
+                };
             }
         }
 
+        /// <summary>
+        /// Método que procesa una URL
+        /// </summary>
+        /// <returns></returns>
+        [HttpPost("geturl")]
+        public async Task<UrlResponse> GetUrlAsync(string url)
+        {
+            var _lstUrl = new List<Url>();
+            try
+            {
+                var _doc = await ProcesaProductoPorURLAsync(url);
+                if (!_doc.Header.Correcto)
+                {
+                    await new LogController(Configuration).InsertLog(new LogErrores()
+                    {
+                        URL = url,
+                        Observaciones = "Error al ProcesaProductoPorURLAsync: " + _doc.Header.Observación
+                    });
+                    throw new Exception(_doc.Header.Observación);
+                }
+
+                var _url = new Models.Url()
+                {
+                    URL = url,
+                    CantPaginas = _doc.FullObject.State.SearchItemList.PagesTotal
+                };
+                //TODO insertar solo si existe...
+                await InsertUrl(_url);
+                _lstUrl.Add(_url);
+
+                return new UrlResponse()
+                {
+                    Header = new Header()
+                    {
+                        Correcto = true,
+                        FechaProceso = DateTime.Now,
+                        Observación = "URL procesadas correctamente",
+                    },
+                    Urls = _lstUrl
+                };
+            }
+            catch (Exception ex)
+            {
+                return new UrlResponse()
+                {
+                    Header = new Header()
+                    {
+                        Correcto = false,
+                        FechaProceso = DateTime.Now,
+                        Observación = ex.Message
+                    }
+                };
+            }
+        }
 
         public IConfiguration Configuration { get; }
         private IFirebaseClient client;
@@ -348,7 +448,7 @@ namespace BuscaPreciosV2.Controllers
 
             string connString = configuration.GetSection("ConnectionApp").GetSection("FirebaseSecretCode").Value;
             string basePath = configuration.GetSection("ConnectionApp").GetSection("BasePath").Value;
-
+            Configuration = configuration;
             IFirebaseConfig config = new FirebaseConfig
             {
                 AuthSecret = connString,

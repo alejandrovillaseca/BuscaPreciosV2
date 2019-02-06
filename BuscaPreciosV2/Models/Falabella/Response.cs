@@ -5,15 +5,13 @@ using System.Threading.Tasks;
 
 namespace BuscaPreciosV2.Models.Falabella
 {
+    /// <summary>
+    /// Contiene todas las páginas de la categoría de productos
+    /// </summary>
     public class Response
     {
         public Header Header { get; set; }
-        public List<ProductoResponse> Productos { get; set; }
-    }
-
-    public class ResponsePorPagina
-    {
-        public Header Header { get; set; }
-        public ProductoResponse ProductosPorPágina { get; set; }
+        public List<ResultList> Productos { get; set; }
+        public ProductoResponse FullObject { get; set; }
     }
 }

@@ -91,16 +91,18 @@ namespace BuscaPreciosV2.Models.Falabella
         public string Label { get; set; }
         public string ExtraInfo { get; set; }
     }
-
+    /// <summary>
+    /// Este es un producto para falabella cl
+    /// </summary>
     public partial class ResultList
     {
-        public long ProductId { get; set; }
+        public string ProductId { get; set; }
         public string Url { get; set; }
         public string Brand { get; set; }
         public string BackendCategory { get; set; }
-        public long SkuId { get; set; }
+        public string SkuId { get; set; }
         public bool IsPrimeAvailable { get; set; }
-        public long MediaAssetId { get; set; }
+        public string MediaAssetId { get; set; }
         public string OnImageHover { get; set; }
         public string Title { get; set; }
         public bool UseImageAtProductLevel { get; set; }
